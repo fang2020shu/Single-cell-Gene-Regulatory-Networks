@@ -11,6 +11,7 @@ For detailed introduction and instruction on how to implement these methods, ref
 To implement these methods, R 4.0.0 and Python 3.8 are required in addition to various packages included in the codes.
 
 
+
 The Algorithms Folder: The individual step-by-step codes for installing and running the six single-cell GRN construction methods.
 
 The Data Folder: The original dataset and ground truth network used.
