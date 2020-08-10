@@ -1,5 +1,5 @@
 # Single-cell-Gene-Regulatory-Networks
-Author: Fang Shu
+Author: Fang Shu\\
 Date: August 2020
 Texas A&M University
 
