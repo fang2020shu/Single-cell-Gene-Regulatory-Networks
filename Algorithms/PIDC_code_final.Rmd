@@ -1,0 +1,221 @@
+---
+title: "PIDC_code_final"
+author: "Fang Shu"
+date: "August 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This dataset was obtained from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE81252.
+The cell types measured in the dataset are human mature hepatocyctes (hHEP)
+
+The dataset is from an scRNA-seq experiment on induced pluripotent stem cells (iPSCs) in two-dimensional culture  differentiating to hepatocyte-like cells. The datasets contains 425 scRNA-seq meansurements from multiple time points: days 0 (iPSCs),6,8,14 and 21 (mature hepatocyte-like).
+
+This guide guides the user in:
+
+ 1. Estimating the mutual information matrix and discretizing data
+ 
+ 2. Inferring a network modeling the interactions between the dataset's variables
+ 
+ 3. Comparing the infered network to a network of known interactions in order to compute FB-scores
+ 
+ 4. Plotting the precision-recall and receiver operating characteristic curves
+ 
+ 5. Plotting the infered network using the Rgraphviz package
+
+As the package is not in the R-CRAN, use the following code to install:
+
+#if (!requireNamespace("BiocManager",quietly=TRUE))
+
+#install.packages("BiocManager")
+
+#BiocManager::install("minet")
+
+#####################
+```{r}
+library(minet)
+library(data.table)
+library(infotheo)
+data<-read.csv("PreprocessedExpressionData_transposed.csv",header = TRUE)
+dim(data)
+data1<-data.frame(data[,-1],row.names = data[,1])
+dim(data1)#764,302
+```
+
+discretize() discretizes data using the equal frequencies or equal width binning algorith."equalwidth" and "equalfreq"
+discretizes each random variable (each column) of the data into nbins. 
+Divide the interval into subintervals all having the same size.
+All the mutual information estimators require discrete data values.
+
+```{r}
+disc<-"equalwidth"
+nbins<-sqrt(nrow(data1))
+ew.data<-discretize(data1,disc,nbins)
+ew.data[1:10,1:10]
+```
+
+Equal Frequencies Binning
+Divide the interval into subintervals with each having the same number of data points, therefore size of each subinterval can be different
+
+```{r}
+disc<-"equalfreq"
+ef.data<-discretize(data1,disc,nbins)
+ef.data[1:10,1:10]
+```
+
+
+BUILD MUTUAL INFORMATION MATRIX
+
+build.mim() takes the dataset as input and computes the mutual information between all pairs of variables according to the mutual information estimator. The results are saved in the mutual information matrix(MIM), a square matrix whose (i,j) element is the mutual information between variables Xi and Xj.
+
+INPUT PARAMETERS:
+
+dataset: data.frame containing gene expression data or any dataset where columns contain variables/features and rows contain outcomes/samples
+
+estimator: The name of the entropy estimator to be used
+
+disc: the name of the discretization method to be used with one of the discrete
+
+estimators:"none","equalfreq","equalwidth","globalequalwidth"
+
+nbins:integer specifying the number of bins to be used for the discretization; default is set to sqrt(m) where m is the number of samples
+
+```{r}
+estimator = "mi.empirical"#This estimator computes the entropy of the empirical probability distribution
+mim<-build.mim(discretize(data1),estimator)
+mim[1:10,1:10]
+
+estimator = "mi.mm"#The Miller-Madow asymptotic bias corrected empirical estimator
+mim<-build.mim(discretize(data1),estimator)
+mim[1:10,1:10]
+
+estimator = "mi.sg"#The Schurmann-Grassberger estimate of the entropy of a Dirichlet probability distribution
+mim<-build.mim(discretize(data1),estimator)
+mim[1:10,1:10]
+
+estimator = "mi.shrink"#A shrinkage estimate of the entropy of a Dirichlet probability distribution
+mim<-build.mim(discretize(data1),estimator)
+mim[1:10,1:10]
+```
+The three estimators "mi.empirical","mi.mm", and "mi.sg" gives similar results.
+
+
+MAXIMUM RELEVANCE MINIMUM REDUNDANCY
+
+mrnet takes the mutual information matrix as input in order to infer the network using the maximum relevance/minimum redundancy feature selection method.
+mim is a square matrix whose i,jth element is the mutual information between variables X_i and X_j.
+The MRNET approach consists in repeating a MRMR feature selection procedure for each variable of the dataset. 
+The MRMR method starts by selecting the variable Xi having the highest mutual information with the target Y. 
+The weight of each pair Xi,Xj will be the maximum score between the one computed when Xi is the target and the one computed when Xj is the target mrnet returns a matrix which is the weighted adjacency matrix of the network. 
+
+```{r}
+mim<-build.mim(discretize(data1),estimator="mi.empirical")
+net<-mrnet(mim)
+net[1:10,1:10]
+```
+
+MUTUAL INFORMATION NETWORK
+
+The minet function Infers directly the mutual information network from the input dataset. Besides the dataset, arguments are the mutual information estimator, the inference method, the binning algorithm, and the number of bins to use. 
+Can use the following to summarize all we did above
+Network inference methods: aracne,clr,mrnet. These receive as input the mutual information matrix and 
+return the weighted adjacency matrix of the network. The network can be directly inferred from the dataset 
+by the minet function. This function takes as input the dataset, the name of the estimator and the name of the discretization method to be used as well as the number of bins to be used. 
+
+For a given dataset, minet infers the network in two steps. First, the mutual information between all pairs of variables in dataset is computed according to the estimator argument. Then the algorithm given by method considers the estimated mutual informations in order to build the network.
+Can use the minet() function to summarize what we did at the top
+
+```{r}
+net <- minet(data1,method = "mrnet",estimator = "mi.empirical",disc = "equalwidth",nbins = sqrt(nrow(data1)))
+net[1:10,1:10]
+```
+method is the name of the inference algorithm:"clr","aracne","mrnet".
+
+
+#######################################################
+Assessment functionalities in minet
+In order to benchmark the inference methods,the package provides a number of assessment tools.
+The validate(net,ref.net,steps=50)allows to compare an inferred network net to a reference network ref.net, described by a Boolean adjacency matrix.
+The assessment process consists in removing the inferred edges having a score below a given threshold and in computing the related confusion matrix,for steps thresholds ranging from the minimum to the maximum value of edge weights.
+A resulting dataframe table containing the list of all the steps confusion matrices is returned.
+pr(table) returns the related precisions and recalls, rates(table)computes true positive and false positive rates, while fscores(table,beta) returns the Fb-scores. show.pr(table) and show.roc(table) plots the PR-curves and ROC-curves
+
+INFERENCE VALIDATION
+
+validate compares the infered network to the true underlying network for several threshold values and appends the resulting confusion matrices to the returned object.
+#validate(inet,tnet)
+
+inet	
+This is the infered network, a data.frame or matrix obtained by one of the functions minet, aracne, clr or mrnet .
+
+tnet	
+The true underlying network. This network must have the same size and variable names as inet.
+The first network inet is compared to the true underlying network, tnet, in order to compute a confusion (adjacency) matrix.
+All the confusion matrices, obtained with different threshold values, are appended to the returned object. 
+In the end the validate function returns a data.frame containing steps+1 confusion matrices.
+
+VALIDATION
+Obtaining Confusion Matrices
+
+Many low weighted edges can be removed by using a threshold value. By setting to 0 all edges whose weight are lower than the threshold and to 1 the other edges weight, the netowrk inference problem can be seen as a binary decision problem.
+The decision made by the algorithm can be summarized by a confusion matrix.
+In this case, the threshold value can be seen as the minimal edge weight required for the edge to be infered: edges whose weight are strictly below the threshold are removed from the network. Then, a different confusion matrix is obtained for each different threshold. The table returned by the validate function contains all the confusion matrices obtained with steps thresholds ranging from the lowest to the highest value of the edges weight validate returns a data.frame whith four columns named thrsh, tp, fp, fn. These values are computed for each of the steps thresholds. Thus each row of the returned object contains the confusion matrix for a different threshold.
+
+In the above code, the validate function compares the inferred network net to syn.net, the network underlying syn.data.
+Each line of the returned table contains the threshold used and the confusion matrix obtained by comparing 
+syn.net to the infered network
+
+```{r}
+data("syn.data")
+data("syn.net")
+net <- minet(syn.data)
+table<-validate(net,syn.net)
+table[1:50,]
+```
+
+Using the Confusion matrices
+
+The confusion matrix summarizes the decisions made by the algorithm. To compare inference algorithms, we compare their confusion matrix, more precisely, compare several criterias derived from that matrix
+Precision:p=TP/(TP+FP), Recall:r=TP/(TP+FN), True Positive Rate: tpr=TP/(TP+TN), False positive rate: fpr=FP/(FP+FN)
+FB-score:FB = (1+B)pr/(Bp+r)
+These scores are returned by the functions rates, pr and fscores. The functions show.pr and show.roc can be used to visualize precision-recall curves and receiver operating characteristic curves. The show.pr function uses the precisions and recalls computed by the function pr and the show.roc relies on the rates returned by the rates function in order to plot receiver operating characteristic curves.
+
+```{r}
+pr(table)[1:50,]
+```
+
+table is the data.frame returned by the validate function where columns contain TP,FP,TN,FN values (confusion matrix)and the threshold value used
+The function pr returns a data.frame where steps is the number of thresholds used in the validation process. 
+The first column contains precisions and the second recalls
+
+```{r}
+rates(table)[1:10,]
+```
+
+The function rates also returns a data.frame where the first column contains true positive rates and the
+second column false positive rates 
+
+```{r}
+fscores(table,beta=1)[1:100]
+```
+
+The function fscores returns fscores according to the confusion matrices contained in the 'table' argument 
+
+```{r}
+dev<-show.pr(table,pch=2,type="b",col="green")
+```
+Plots the PR-curve
+```{r}
+show.pr(table,device=dev,pch=1,type="b",col="blue")
+
+dev<-show.roc(table,type="b",col="green")
+show.roc(table,device = dev,type="b",col="blue")
+
+
+library(Rgraphviz)
+net<-minet(dataset = discretize(syn.data), method = "aracne",estimator = "mi.mm")
+plot(as(net,"graphNEL"))
+```
