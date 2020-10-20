@@ -1,0 +1,190 @@
+---
+title: "SCODE.Rmd"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Optimize linear Ordinary Differential Equation and infer regulatory network from time course data
+```{r}
+library(MASS)
+
+
+maxB <- 2.0
+minB <- -10.0
+```
+
+#system(paste("mkdir", dir, sep=" "))
+#fdata<-read.csv("GSE81252.scode.expression.csv",header=TRUE)
+#fdata<-data.frame(fdata[,-1],row.names = fdata[,1])
+INPUT 1: Gene expression dataset, each row corresponds to a gene and each column corresponds to a cell
+200 transcription factors, 100 cells
+```{r}
+X <- as.matrix(read.table("GSE81252.scode.expression.txt", header = TRUE, sep = "\t"))[1:200,1:100]
+dim(X)
+
+W <- matrix(rep(0,200*2),nrow=200,ncol = 2)
+dim(W)
+Z <- matrix(rep(0,2*100),nrow=2,ncol=100)
+dim(Z)
+WZ <- matrix(nrow=200, ncol=100)
+dim(WZ)
+```
+
+read pseudo-time and normalize pseudo-time
+INPUT 2:Pseudo-time dataset,first column is the index of a cell/experimental time point,second column is time parameter (normalized from 0.0 to 1.0)
+```{r}
+pseudotime <- read.table("GSE81252.scode.time.txt", header = FALSE, sep = "\t")[1:100,2]
+dim(pseudotime)
+max(pseudotime)
+min(pseudotime)
+#pseudotime <- (as.matrix(pseudotime))/max(as.matrix(pseudotime))
+pseudotime<-pseudotime/max(pseudotime)
+
+new_B <- rep(0, 2)
+old_B <- rep(0, 2)
+
+#Initialization
+RSS <- Inf
+for(i in 1:2){#Initialize a diagonal matrix randomly
+  new_B[i] <- runif(1, min=minB, max=maxB)
+  old_B[i] <- new_B[i]
+}
+
+#function to sample Z
+sample_Z <- function(){#Z is generated from dz=Bzdt
+  for(i in 1:2){
+    for(j in 1:100){
+      Z[i,j] <<- exp(new_B[i]*pseudotime[j]) + runif(1, min=-0.001, max=0.001)#includes noise
+    }
+  }
+}
+
+#optimize W and B iteratively
+for(ite in 1:100){
+  #sampling B
+  target <- floor(runif(1, min=1, max=3))
+  new_B[target] <- runif(1, min=minB, max=maxB)
+  
+  #for last calculation
+  if(ite == 100){
+    for(i in 1:2){
+      new_B[i] <- old_B[i]
+    }
+  }
+  
+  #sample Z from new B
+  sample_Z()
+  
+  #regression
+  for(i in 1:200){#W is solution of linear regression
+    X.lm <- lm(X[i,] ~ t(Z)-1)
+    for(j in 1:2){
+      W[i,j] <- X.lm$coefficients[j]
+    }
+    WZ[i,] <- W[i,] %*% Z
+  }
+  
+  #RSS
+  tmp_RSS <- sum((X-WZ)**2)
+  if(tmp_RSS < RSS){#If RSS(B^k,W^k)<RSS(B_hat,W_hat)
+    RSS <- tmp_RSS
+    old_B[target] <- new_B[target]
+  }
+  else{#end if B^(k+1)
+    new_B[target] <- old_B[target]
+  }
+}
+```
+```{r}
+dir=getwd()
+#output RSS
+#The residual sum of squares of linear regression
+write.table(RSS, paste(dir,"/RSS.txt",sep=""), row.names=F, col.names=F, sep="\t")
+
+#output W
+#A GxD matrix corresponding to W of linear regression
+write.table(W, paste(dir,"/W.txt",sep=""), row.names=F, col.names=F, sep="\t")
+
+#infer A
+B <- matrix(rep(0,2*2), nrow=2, ncol=2)
+for(i in 1:2){
+  B[i,i] <- new_B[i]
+}
+invW <- ginv(W)
+A <- W %*% B %*% invW
+
+#output A and B
+#This is a 200x200 matrix, corresponding to the inferred regulatory network. Aij represents the regulatory relationship from TF j to TF i.
+write.table(A, paste(dir,"/A.txt",sep=""), row.names=F, col.names=F, sep="\t")
+#A DxD diagonal matrix which corresponds to the optimized paramters of ODE of z, whereas D is the number of z.
+write.table(B, paste(dir,"/B.txt",sep=""), row.names=F, col.names=F, sep="\t")
+```
+
+Downstream Analysis
+Calculation of RSS (RSS.R)
+To choose appropriate size of z, recommend to calculate RSS of independent test data
+Input 1: GxC matrix of expression data
+Input 2: Pseudo-time data
+Output: RSS for this data
+G: The number of transcription factors, D: The number of z, C: The number of cells
+
+```{r}
+X <- as.matrix(read.table("GSE81252.scode.expression.txt", header = TRUE, sep = "\t"))[1:200,1:100]
+dir<-getwd()
+W <- as.matrix(read.table(paste(dir,"/W.txt",sep="")))
+Z <- matrix(rep(0,2*100), nrow=2, ncol=100)
+WZ <- matrix(nrow=200, ncol=100)
+B <- read.table(paste(dir,"/B.txt",sep=""))
+
+pseudotime <- read.table("GSE81252.scode.time.txt", header = FALSE, sep = "\t")[1:100,2]
+pseudotime <- pseudotime/max(pseudotime)
+
+sample_Z <- function(){
+  for(i in 1:2){
+    for(j in 1:100){
+      Z[i,j] <<- exp(B[i,i]*pseudotime[j]) + runif(1, min=-0.001, max=0.001)
+    }
+  }
+}
+
+sample_Z()
+for(i in 1:200){
+  WZ[i,] <- W[i,] %*% Z
+}
+
+RSS_new <- sum((X-WZ)**2)
+RSS_new
+write.table(RSS_new, paste(dir,"/RSS_new.txt",sep=""), row.names=F, col.names=F, sep="\t")
+```
+
+
+Reconstruction of expressio ndynamics 
+Calculate the dynamics from optimzied linear ODE
+Input 1: Initial value of x, each row corresponding to a gene. Column 1 is index of a gene, column2 is initial value.
+Input 2: A.txt
+Output: (G+1)x101 matrix of reconstructed expression dynamicsdata, where G is the number of transcription factors.
+The first column corresponds to time paramter (from 0.0 to 1.0 with 0.01 interval). Each row corresponds to each gene
+and each column corresponds to each time point.
+```{r}
+init <- as.matrix(read.table("intial_try.txt", sep="\t"))[1:200,2]
+A <- as.matrix(read.table("A.txt", sep="\t"))
+tmp <- eigen(A)
+U <- tmp$vectors
+invU <- solve(U)
+l <- tmp$values
+mean <- matrix(nrow=200, ncol=201)
+tmpt <- (0:200)*0.01
+for(i in 1:length(tmpt)){
+  t <- tmpt[i]
+  eAt <- Re(U %*% diag(exp(l*t)) %*% invU)
+  mean[,i] <- eAt %*% init
+}
+dir=getwd()
+write.table(rbind(tmpt, mean), paste(dir,"/reconstructed_dynamics.txt",sep=""), col.names=F, row.names=F,sep="\t")
+```
