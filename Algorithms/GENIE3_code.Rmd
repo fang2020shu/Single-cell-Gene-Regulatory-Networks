@@ -1,0 +1,166 @@
+---
+title: "GENIE3 Guide"
+author: "Fang Shu"
+date: "August 2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This guide guides the user in using the R package GENIE3
+```{r}
+data<-read.csv("PreprocessedExpressionData_transposed.csv", header = TRUE)
+data1<-data.frame(data[,-1],row.names = data[,1])
+dim(data1)
+```
+Since the package GENIE3 is not in the R Cran Repository, use the following code to download
+```{r}
+#if(!requireNamespace("BiocManager",quietly = TRUE))
+#install.packages("BiocManager")  
+#BiocManager::install("GENIE3")
+```
+
+```{r}
+library(GENIE3)
+data2<-t(data1)
+dim(data2)
+```
+Run GENIE3 with its default parameters.
+GENIE3 infers a gene regulatory network in the form of a weighted adjacency matrix from expression data,using ensembles of regression trees.
+The input is an expression matrix, where each row is a gene and every column is a sample.
+
+```{r}
+weightMat<-GENIE3(data2)#The weighted adjacency matrix
+weightMat[1:10,1:6]
+dim(weightMat)
+```
+This command computes the weighted adjacency matrix of the gene network with the GENIE3 algorithm (Random Forests).In the weight
+matrix, element (i,j) (row i, column j) gives the weight of the link from regulatory gene i to target gene j, with high
+scores corresponding to more likely regulatory links.
+The algorithm outputs a matrix containing the weights of the putative regulatory links, with higher weights corresponding to
+more likely regulatory links. weightMat[i,j] is the weight of the link directed from the i-th gene to j-th gene.
+
+
+Restrict the candidate regulators to a subset of genes
+By default, all the genes are used as candidate regulators. The list of candidate regulators can however be restricted to a 
+subset of genes. This can be useful when you know which genes are transcription factors.
+
+```{r}
+regulators <- c("MKL2","CD109","MAST2")
+regulators
+weightMat <- GENIE3(data2,regulators = regulators)
+weightMat[1:3,1:6]
+```
+Here only Gene MKL2, Gene CD109,and Gene MAST2 were used as candidate regulators. In the resulting weightMat, the links that are directed from genes that are not candidate regulators have a weight equal to 0.
+
+Change the tree-based method and its settings
+
+GENIE3 is based on regression trees. These trees can be learned using either the Random Forest method or the Extra-Trees method.
+The tree-based method can be specified using the tree.method parameter(tree.method="RF") for Random Forests,or tree.method="ET" for Extra-Trees.
+Each tree-based method has 2 parameters: K and ntrees. K is the number of candidate regulators that are randomly selected at 
+each tree node for the best split determination. P is the number of candidate regulators. K must be between 1 and p.
+The parameter ntrees specifies the number of trees that are grown per ensemble. It can be set to any strictly positive integer.
+
+Use Extra-Trees (ET) method
+
+7 randomly chosen candidate regulators at each node of a tree
+50 trees per ensemble
+```{r}
+weightMat1 <- GENIE3(data2, treeMethod = "ET", K=7,nTrees = 50)
+weightMat1[1:10,1:6]
+```
+Increasing the value of K
+```{r}
+weightMat2 <-GENIE3(data2,treeMethod = "ET", K=8, nTrees=50)
+weightMat2[1:12,1:6]
+```
+Increasing the value of trees
+```{r}
+weightMat3 <-GENIE3(data2,treeMethod = "ET", K=7, nTrees = 60)
+weightMat3[1:10,1:6]
+```
+
+Comparing the effects on the weights by changing K and nTrees
+```{r}
+weightMat1[weightMat1>weightMat2]<- 1
+table(weightMat1==1)
+table(weightMat1==0)
+weightMat1 <- GENIE3(data2, treeMethod = "ET", K=7,nTrees = 50)
+weightMat1[weightMat1>weightMat3]<-1
+table(weightMat1==1)
+table(weightMat1==0)
+```
+
+
+Use Random-Forest (RF) method
+```{r}
+weightMat4 <-GENIE3(data2, treeMethod = "RF",K=7, nTrees = 50)
+weightMat4[1:10,1:6]
+```
+Increasing the value of K
+```{r}
+weightMat5 <-GENIE3(data2, treeMethod = "RF",K=8, nTrees = 50)
+weightMat5[1:10,1:6]
+```
+Increasing the value of trees
+```{r}
+weightMat6 <-GENIE3(data2, treeMethod = "RF",K=7, nTrees = 60)
+weightMat6[1:10,1:6]
+```
+
+Comparing the effects on the weights by changing K and nTrees
+```{r}
+weightMat4[weightMat4>weightMat5]<- 1
+table(weightMat4==1)
+table(weightMat4==0)
+weightMat4 <-GENIE3(data2, treeMethod = "RF",K=7, nTrees = 50)
+weightMat4[weightMat4>weightMat6]<-1
+table(weightMat4==1)
+table(weightMat4==0)
+```
+
+INPUT
+
+K is the number of candidate regulators randomly selected at each tree node for the determination of the best split.
+Must be either "sqrt" for the square root of the total number of candidate regulators (default), "all" for the total number of candidate regulators, or a stritly positive integer.
+
+nTrees is the number of trees in an ensemble for each target gene, default is 1000.
+
+Get the list of the regulatory links
+Get all the regulatory links
+Can obtain the list of all the regulatory links (from most likely to least likely):
+
+```{r}
+weightMat<-GENIE3(data2)
+linkList <- getLinkList(weightMat)#getLinkList converts the weight matrix returned by GENIE3 to a sorted list of regulatory links
+dim(linkList)
+head(linkList)
+```
+
+The resulting linkList matrix contains the ranking of links. Each row corresponds to a regulatory link. The first column shows
+the regulator, the second column shows the target gene, and the last column indicates the weight of the link.
+
+Get only the top-ranked links
+Usually only interested in extracting the most likely regulatory links.The optional parameter report.max sets the number of 
+top-ranked links to report:
+
+```{r}
+linkList <- getLinkList(weightMat,reportMax = 5)
+linkList
+```
+
+Get only the links with a weight higher than some threshold.
+A threshold can be set on the weight of the links:
+```{r}
+linkList <- getLinkList(weightMat,threshold=0.1)
+linkList
+```
+
+Important note on the interpretation of the weights
+
+The weights of the links returned by GENIE3() do not have any statistical meaning and only provide a way to rank the regulatory
+links. There is therefore no standard threshold value,and caution must be taken when choosing one.
