@@ -1,0 +1,111 @@
+---
+title: "LEAPS.Rmd"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library("LEAP")
+```
+Maximum Absolute Correlation (MAC) Counter Function
+Can use Mac_counter() function to calculate the Max Absolute Correlation (MAC) matrix for the data.
+The output is a matrix where Row gene index and Column gene index correspond to the indices for the gene pair (i,j).
+Correlation is the maximum absolute correlation achieved for the pair, and Lag is the lag at which the MAC occured.
+
+Parameters
+Setting MAC_cutoff=0.15 restricts the output to only those pairs with an MAC of 0.15 or greater.It is the lowest MAC value
+to be shown in the results.
+max_lag_prop is the largest proportion of the experiments the user wants the lag to be. The default is 1/3
+For this dataset, as there are 200 experiments, the largest lag will be 66
+Setting lag_matrix=T creates the lag_example.csv which stores the resulting matrix of lag values
+```{r}
+data_used <- read.csv("GSE81252.leap.final.new.csv", header = TRUE)
+data_used_new <-data.frame(data_used[,-1],row.names = data_used[,1])
+dim(data_used_new)
+MAC_results = MAC_counter(data = data_used_new, max_lag_prop = 1/3, MAC_cutoff = 0.15,file_name = "example",lag_matrix = T)
+MAC_results[99:119,]
+MAC_results[1:4,1:4]
+data2_new <- read.csv("MAC_example.csv")
+dim(data2_new)
+data2_new[1:4,1:4]
+```
+
+Note the diagonal is set to NA. The lag_example file contains the resulting lag matrix from applying MAC_counter() to the dataset.
+```{r}
+data3_new <- read.csv("lag_example.csv")
+dim(data3_new)
+```
+Each of the values in the lag matrix correspond to the size of the lag used on the gene listed in the column.
+In this example, 23 corresponds to gene 7's expression at its first pseudo-tome point and staggering the expression og gene 6 by 11 pseudo-time points
+(hence starting at 24)
+```{r}
+data3_new[1:10,1:10]
+```
+
+Permutation Analysis Function
+Parameters
+MACs_observ is the resulting matrix of MACs from running MAC_counter on the dataset
+The variable num_perms determines the number of permutations to use, default is 100.
+FDR_cutoffs determines the number of cutoffs to split the domain [0,1] for the correlation, default is 101.
+To determine a cutoff for significant MAC values, can use the MAC_perm function
+```{r}
+MAC_perm(data = data_used_new, MACs_observ = MAC_example, num_perms = 30, max_lag_prop = 1/3, FDR_cutoffs = 101, perm_file_name = "example")
+```
+The returned dataset has 4 columns. cors is the correlation cutoffs and MACs_observed are the number of observed correlations at that cutoff.
+MACs_ave_perm are the average number observed in the permuted datasets at that cutoff,
+and fdr is the false discovery rate (FDR) at that cutoff.
+```{r}
+data4_new<- read.csv("perm_example.csv")
+dim(data4_new)
+data4_new[74:101,]
+```
+
+Can also view the distribution of lags at various correlation cutoffs.
+First, must convert the numerical values in lag matrix into categorical variables based on cutoffs the user will designate.
+Pull-out non-NA values 
+```{r}
+cors=c()
+lag=c()
+for (i in (1:200)){
+  cors=c(cors,na.omit(data2_new[,i]))
+  lag=c(lag,na.omit(data3_new[,i]))
+}
+#Then convert the lag values into categorical cutoffs. 
+lag_bin=c()
+for(i in (1:79600)){
+  if(is.na(lag[i])){
+    lag_bin[i]=="NA"
+  }
+  else if(lag[i]==0){
+    lag_bin[i]="0"
+  }
+  else if(lag[i]>0 & lag[i]<=10){
+    lag_bin[i]="1-10"
+  }
+  else  if(lag[i]>10 & lag[i]<=20){
+    lag_bin[i]="11-20"
+  }
+  else if(lag[i]>20 & lag[i]<=30){
+    lag_bin[i]="21-30"
+  }
+  else if(lag[i]>30 & lag[i]<=40){
+    lag_bin[i]="31-40"
+  }
+  else{
+    lag_bin[i]=">40"
+  }
+}
+#Then combine the correlation values and lag bins to create a dataframe ggplot2 can use.
+data = as.data.frame(cbind(cors,lag,lag_bin))
+dim(data)
+data$cors = as.numeric(as.character(data$cors))
+data$lag_bin = factor(lag_bin, levels =c(">40", "31-40", "21-30", "11-20", "1-10", "0"))
+library(ggplot2)
+ggplot(data = data, aes(data$cors)) + geom_histogram(binwidth = 0.05, aes(fill = lag_bin)) + scale_y_sqrt() +xlab("Correlation") +ylab("Square Root Counts")+guides(fill=guide_legend(title="Lag")) + ggtitle("Histogram of Correlations")
+```
