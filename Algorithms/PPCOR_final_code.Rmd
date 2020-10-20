@@ -1,0 +1,115 @@
+---
+title: "PPCOR Documentation"
+author: "Fang Shu"
+date: "August 2020"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data<-read.csv("PreprocessedExpressionData_transposed.csv", header = TRUE)
+data1<-data.frame(data[,-1],row.names = data[,1])
+library(ppcor)
+```
+
+Partial correlation is a measure of the strength and direction of a linear relationship between 2 continuous variables,
+while controlling for the effect of one or more other continuous variables.
+The pcor function will generate a full matrix of pairwise partial correlations controlling for all variables other than the two variablesin the bivariate correlation, along with tests of statistical significance, for all pairs of variables.
+
+```{r}
+pcor(x=data1,method = "pearson")$estimate[1:10,1:6]
+pcor(x=data1,method = "spearman")$estimate[1:10,1:6]
+#pcor(x=data1,method = "kendall")$estimate
+pcor(x=data1,method = "pearson")$p.value[1:10,1:6]
+pcor(x=data1,method = "pearson")$statistic[1:10,1:6]
+pcor(x=data1,method = "pearson")$n
+pcor(x=data1,method = "pearson")$gp
+pcor(x=data1,method = "pearson")$method
+```
+This output has six values.
+
+1) estimate, which is a matrix of the partial correlation coefficient between two variables
+
+2) p.value, which is a matrix of the level of statistical significance/p-vallue of the test
+
+3) statistic, which is a matrix of the value of the test statistic
+
+4) n, which is the total number of samples
+
+5) gp, which is the number of given or controlled variables
+
+6) method, which is the used correlation method (Pearson/default, Kendall, Spearman)
+
+The greater the absolute value of the partial correlation coefficient between a pair of variables, the more linearly correlated
+the variables are. And if we do an hypothesis test, the null hypothesis would be that no correlation exists between a pair of variables, while the alternative hypothesis would be that a correlation exists between a pair of variables.
+We can also see that for those pairs of variables that have a large partial correlation coefficient, they have a small p-value corresponding, which means we have sufficient evidence to reject the null hypothesis and conclude a correlation exists.
+
+```{r}
+#colSums(data1)
+#sum(colSums(data1)==0)
+```
+
+
+The partial correlation between "MKL2" and "CD109" given "MAST2".
+
+```{r}
+pcor.test(x=data1$MKL2,y=data1$CD109,z=data1$MAST2)
+pcor.test(x=data1$MKL2,y=data1$CD109,z=data1$MAST2,method = "spearman")
+#pcor.test(x=data1$PLEKHN1,y=data1$CD109,z=data1$MAST2,method = "kendall")
+```
+x and y are called the focal variables, and z is the control variable. There can be more than one control variables
+
+Can also find the partial correlation between two genes given a third gene by:
+
+```{r}
+reg1<-lm(data1$MKL2~data1$MAST2)
+resid1<-resid(reg1)
+reg2<-lm(data1$CD109~data1$MAST2)
+resid2<-resid(reg2)
+cor(resid1,resid2)#Generate the same result as pcor.test
+cor.test(resid1,resid2)#Gives a confidence interval on the correlation coefficient
+```
+
+The semi-partial correlation between "MKL2" and "CD109" given "MAST2".
+
+```{r}
+spcor.test(x=data1$MKL2,y=data1$CD109,z=data1$MAST2)
+spcor.test(x=data1$MKL2,y=data1$CD109,z=data1$MAST2,method = "spearman")
+#spcor.test(x=data1$MKL2,y=data1$CD109,z=data1$MAST2,method = "kendall")
+```
+
+We can also be interested in computing the semi-partial correlation between two genes given two other genes.
+The semi-partial correlation between MKL2 and CD109 given MAST2 and KAT5 is calculated with
+
+```{r}
+spcor.test(x=data1$MKL2,y=data$CD109,z=data1[,c("MAST2","KAT5")])
+spcor.test(x=data1$MKL2,y=data$CD109,z=data1[,c("MAST2","KAT5")],method = "spearman")
+#spcor.test(x=data1$MKL2,y=data$CD109,z=data1[,c("MAST2","KAT5")],method="kendall")
+```
+
+Scatterplots show how much one variable is affected by another, while the relationship between two variables is called their correlation
+Generating a pairwise comparison scatterplot
+
+```{r}
+data3<- data[,c("MKL2","CD109","MAST2")]
+pairs(data3,panel = panel.smooth)
+data4<- data[,c("UBE2Z","RGPD4","ELF2")]
+pairs(data4,panel = panel.smooth)
+pairs(data[,c(5,6:15)])
+library(corrplot)
+cor_matrix <- cor(data[,c(5,6:15)])
+corrplot.mixed(cor_matrix, lower = "circle", upper = "number", tl.pos = "lt", diag = "u")
+```
+
+Semi-partial correlation is the correlation of two variables with variation from a third variable removed only from the second variable.
+The function spcor can calculate the pairwise semi-partial correlations for each pair of variables given others
+
+```{r}
+spcor(x=data1,method = "pearson")$estimate[1:10,1:6]
+spcor(x=data1,method = "spearman")$estimate[1:10,1:6]
+#spcor(x=data1,method = "kendall")$estimate
+```
